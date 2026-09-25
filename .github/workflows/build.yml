@@ -1,0 +1,100 @@
+# Runs the tests, builds the Windows installer, and (for version tags) publishes a release.
+#
+# Every push to main: the installer is attached to the workflow run as an artifact
+#   (Actions tab -> the run -> "Artifacts" at the bottom).
+# Pushing a tag like v1.0.1: also creates a GitHub Release with the installer.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to create releases
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy matplotlib pytest
+      - run: pytest -q
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller==6.22.3
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          v=$(python -c "import photoelectric; print(photoelectric.__version__)")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF_NAME#v}" != "$v" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match __version__ $v in photoelectric/__init__.py"; exit 1
+          fi
+
+      - name: Build app with PyInstaller
+        run: pyinstaller --noconfirm --clean packaging/photoelectric_windows.spec
+
+      - name: Smoke test the built app
+        shell: pwsh
+        run: |
+          $exe = "dist\Photoelectric Effect\Photoelectric Effect.exe"
+
+          # No LabJack driver on the build machine, so the hardware check must fail cleanly.
+          $p = Start-Process -FilePath $exe -ArgumentList "--check-hardware","--output","report.txt" -Wait -PassThru
+          Get-Content report.txt
+          if ($p.ExitCode -ne 1) { throw "Expected exit code 1 without hardware, got $($p.ExitCode)" }
+          if (-not (Select-String -Path report.txt -Pattern "LabJack driver could not be loaded" -Quiet)) {
+            throw "Unexpected hardware check report"
+          }
+
+          # The window must start and keep running in simulator mode.
+          $gui = Start-Process -FilePath $exe -ArgumentList "--simulate" -PassThru
+          Start-Sleep -Seconds 20
+          if ($gui.HasExited) { throw "App exited early in simulator mode (exit code $($gui.ExitCode))" }
+          Stop-Process -Id $gui.Id
+          Write-Host "Smoke test passed"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+            $env:PATH += ";C:\Program Files (x86)\Inno Setup 6"
+          }
+          iscc /DAppVersion=${{ steps.version.outputs.version }} packaging\installer.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhotoelectricEffect-Setup-${{ steps.version.outputs.version }}
+          path: dist/PhotoelectricEffect-Setup-${{ steps.version.outputs.version }}.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create ${{ github.ref_name }}
+          "dist/PhotoelectricEffect-Setup-${{ steps.version.outputs.version }}.exe"
+          --title "Photoelectric Effect ${{ steps.version.outputs.version }}"
+          --generate-notes

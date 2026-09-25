@@ -1,0 +1,3 @@
+numpy
+matplotlib
+LabJackPython  # only needed with real hardware; also install the LabJack driver
