@@ -19,7 +19,7 @@ right-hand side of the GitHub repository page).
 
 ## Installing on Macs (Intel or Apple Silicon, macOS 12 or newer)
 
-1. Download `Photoelectric Effect.dmg`, open it, and drag the app into
+1. Download `PhotoelectricEffect-<version>-mac.dmg`, open it, and drag the app into
    Applications. It's a universal app, so the same file runs natively on both
    kinds of Mac. The LabJack driver is inside the app, so there's nothing else
    to install.
@@ -63,7 +63,8 @@ universal build needs an Apple Silicon Mac with Rosetta.
 3. Build the Mac app and add it to the same release:
    ```bash
    sh packaging/build_mac.sh
-   gh release upload v1.0.1 "dist/Photoelectric Effect.dmg"
+   cp "dist/Photoelectric Effect.dmg" dist/PhotoelectricEffect-1.0.1-mac.dmg
+   gh release upload v1.0.1 dist/PhotoelectricEffect-1.0.1-mac.dmg
    ```
 
 Every push to `main` also builds the Windows installer and runs the tests on
